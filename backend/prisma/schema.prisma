@@ -1,0 +1,33 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"  // Change to PostgreSQL/MySQL for production
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(uuid())  // UUID for user identification
+  phone       String   @unique               // Phone number (unique identifier)
+  verified    Boolean  @default(false)       // Whether phone verification is completed
+  publicKey   String?                          // Public key for E2EE (optional)
+  createdAt   DateTime @default(now())         // Timestamp for account creation
+  messages    Message[]                        // Relationship to messages
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  senderId    String
+  sender      User     @relation(fields: [senderId], references: [id])
+  content     String                             // Encrypted message content
+  createdAt   DateTime @default(now())
+}
+
+
