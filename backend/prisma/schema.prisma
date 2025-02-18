@@ -15,12 +15,13 @@ datasource db {
 
 model User {
   id          String   @id @default(uuid())  // UUID for user identification
-  phone       String   @unique               // Phone number (unique identifier)
-  verified    Boolean  @default(false)       // Whether phone verification is completed
-  publicKey   String?                          // Public key for E2EE (optional)
+  phoneHash   String?                          // Store hashed phone here
+  verified    Boolean  @default(false)         // Whether phone verification is completed
+  publicKey   String?                          // For E2EE (optional)
   createdAt   DateTime @default(now())         // Timestamp for account creation
   messages    Message[]                        // Relationship to messages
 }
+
 
 model Message {
   id          String   @id @default(uuid())
