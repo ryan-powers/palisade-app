@@ -1,8 +1,43 @@
 "use client"; // Needed to use React hooks & state in Next.js App Router
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { openDB } from "idb";
+
+async function savePrivateKey(privateKey: string) {
+    const db = await openDB("palisadeDB", 1, {
+      upgrade(db) {
+        db.createObjectStore("keys");
+      },
+    });
+  
+    await db.put("keys", privateKey, "privateKey");
+    console.log("🔐 Private Key securely stored in IndexedDB");
+  }
+
+  export async function getPrivateKey() {
+    console.log("🔍 Checking IndexedDB for Private Key...");
+    
+    try {
+      const db = await openDB("palisadeDB", 1);
+      const privateKey = await db.get("keys", "privateKey");
+  
+      if (!privateKey) {
+        console.warn("⚠️ Private key not found in IndexedDB!");
+      } else {
+        console.log("✅ Private key retrieved from IndexedDB:", privateKey);
+      }
+  
+      return privateKey;
+    } catch (error) {
+      console.error("❌ Error retrieving private key from IndexedDB:", error);
+      return null;
+    }
+  }
 
 export default function LoginPage() {
+  const router = useRouter();
+
   // State management
   const [phone, setPhone] = useState("+1");
   const [code, setCode] = useState("");
@@ -41,16 +76,36 @@ export default function LoginPage() {
   // Verifies OTP
   const verifyOtp = async () => {
     if (!phone || !code) return setMessage("Please provide both phone & code.");
+  
     try {
       const res = await fetch("http://localhost:4000/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone, code }),
       });
+  
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-
+  
       setMessage(`Success! Your phone is verified. User ID: ${data.userId}`);
+  
+      console.log("Public Key from Server:", data.publicKey);
+      console.log("Private Key (Client Only):", data.privateKey);
+  
+      if (data.privateKey) {
+        await savePrivateKey(data.privateKey); // ✅ Ensure key is stored
+        console.log("Private key saved, now redirecting...");
+      }
+
+      if (data.publicKey) {
+        localStorage.setItem("publicKey", data.publicKey);
+      }
+  
+      // ✅ Delay redirect slightly to ensure IndexedDB is updated
+      setTimeout(() => {
+        router.push("/chat");
+      }, 500); // Wait 500ms before redirecting
+  
     } catch (err: any) {
       setMessage("Error: " + err.message);
     }

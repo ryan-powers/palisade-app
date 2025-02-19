@@ -14,8 +14,8 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(uuid())  // UUID for user identification
-  phoneHash   String?                          // Store hashed phone here
+  id          String   @id @default(uuid())    // UUID for user identification
+  phoneHash   String?  @unique                 // Store hashed phone here
   verified    Boolean  @default(false)         // Whether phone verification is completed
   publicKey   String?                          // For E2EE (optional)
   createdAt   DateTime @default(now())         // Timestamp for account creation
@@ -27,7 +27,8 @@ model Message {
   id          String   @id @default(uuid())
   senderId    String
   sender      User     @relation(fields: [senderId], references: [id])
-  content     String                             // Encrypted message content
+  receiverId  String   // ID of the recipient
+  content     String   // ✅ Encrypted message content
   createdAt   DateTime @default(now())
 }
 

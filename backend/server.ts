@@ -5,12 +5,23 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { PrismaClient } from '@prisma/client';
 import twilio from 'twilio';
-import { hashPhone, comparePhone } from './utils/phoneHash';
+import sodium from 'libsodium-wrappers';
+import { hashPhone } from './utils/phoneHash';
 
 
 
 const fastify = Fastify({ logger: true });
 const prisma = new PrismaClient();
+
+// Function to generate a key pair
+async function generateKeyPair() {
+    await sodium.ready;
+    const keyPair = sodium.crypto_box_keypair();
+    return {
+      publicKey: sodium.to_base64(keyPair.publicKey),
+      privateKey: sodium.to_base64(keyPair.privateKey),
+    };
+  }
 
 // Twilio Client Setup
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -49,64 +60,101 @@ fastify.post('/send-otp', async (request, reply) => {
   
 
 // ✅ Verify OTP
-fastify.post('/verify-otp', async (request, reply) => {
+fastify.post("/verify-otp", async (request, reply) => {
     const { phone, code } = request.body as { phone: string; code: string };
-    if (!phone || !code) {
-      return reply.status(400).send({ error: 'Phone and code are required' });
-    }
+    if (!phone || !code) return reply.status(400).send({ error: "Phone and code are required" });
   
     try {
-      // Verify with Twilio
       const verificationCheck = await twilioClient.verify.v2.services(verifyServiceSid)
         .verificationChecks
         .create({ to: phone, code });
   
-      if (verificationCheck.status !== 'approved') {
-        return reply.status(400).send({ error: 'Invalid OTP' });
-      }
+      if (verificationCheck.status === "approved") {
+        const phoneHash = hashPhone(phone); // ✅ Generate a consistent hash
+        console.log("Phone Hash (SHA-256):", phoneHash);
   
-      // OTP is good - now handle hashing
-      const hashed = await hashPhone(phone);
+        // ✅ Find user by static phoneHash
+        let user = await prisma.user.findUnique({
+          where: { phoneHash }, // ✅ Now this works
+        });
   
-      // Search for matching user - naive approach (fine for small prototype)
-      const allUsers = await prisma.user.findMany();
-      let existingUser = null;
+        if (!user) {
+          const keyPair = await generateKeyPair();
   
-      for (const user of allUsers) {
-        if (user.phoneHash && await comparePhone(phone, user.phoneHash)) {
-          existingUser = user;
-          break;
+          // ✅ Store public key for new users
+          user = await prisma.user.create({
+            data: { phoneHash, verified: true, publicKey: keyPair.publicKey },
+          });
+  
+          return reply.send({
+            message: "Phone verified",
+            userId: user.id,
+            publicKey: keyPair.publicKey,
+            privateKey: keyPair.privateKey, // ✅ Send private key to client
+          });
+        } else {
+          await prisma.user.update({
+            where: { phoneHash },
+            data: { verified: true },
+          });
+  
+          return reply.send({ message: "Phone verified", userId: user.id, publicKey: user.publicKey });
         }
-      }
-  
-      let user;
-      if (!existingUser) {
-        // Create new user record, store hashed phone
-        user = await prisma.user.create({
-          data: {
-            phoneHash: hashed,
-            verified: true,
-          },
-        });
       } else {
-        // Update existing user
-        user = await prisma.user.update({
-          where: { id: existingUser.id },
-          data: {
-            phoneHash: hashed, // you can re-hash each verification if you want
-            verified: true,
-          },
-        });
+        return reply.status(400).send({ error: "Invalid OTP" });
       }
-  
-      return reply.send({ message: 'Phone verified', userId: user.id });
     } catch (error) {
-      if (error instanceof Error) {
-        return reply.status(500).send({ error: error.message });
-      }
-      return reply.status(500).send({ error: 'An unknown error occurred' });
+      return reply.status(500).send({ error: error instanceof Error ? error.message : "An unknown error occurred" });
     }
   });
+
+// ✅ Store Encrypted Messages Route (Place this here)
+fastify.post("/send-message", async (request, reply) => {
+    const { senderId, receiverId, encryptedMessage } = request.body;
+    
+    if (!senderId || !receiverId || !encryptedMessage) {
+      return reply.status(400).send({ error: "Missing required fields" });
+    }
+  
+    try {
+        // ✅ Check if sender exists
+        const sender = await prisma.user.findUnique({ where: { id: senderId } });
+        if (!sender) return reply.status(400).send({ error: "Sender not found" });
+    
+        // ✅ Check if receiver exists
+        const receiver = await prisma.user.findUnique({ where: { id: receiverId } });
+        if (!receiver) return reply.status(400).send({ error: "Receiver not found" });
+    
+        // ✅ Create encrypted message
+        const message = await prisma.message.create({
+          data: {
+            senderId,
+            receiverId,
+            content: encryptedMessage, // Store only encrypted content
+          },
+        });
+  
+      return reply.send({ message: "Message stored securely", messageId: message.id });
+    } catch (error) {
+      return reply.status(500).send({ error: error instanceof Error ? error.message : "An unknown error occurred" });
+    }
+  });
+
+fastify.get('/get-messages', async (request, reply) => {
+    try {
+      const messages = await prisma.message.findMany({
+        orderBy: {
+            createdAt: 'asc',
+        },
+    });
+
+      return reply.send(messages);
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+      return reply.status(500).send({ error: "Failed to retrieve messages" });
+    }
+  });
+  
 
 fastify.get('/', async (request, reply) => {
   return { message: 'Hello from Fastify with Twilio Verify!' };
