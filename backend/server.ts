@@ -8,8 +8,6 @@ import twilio from 'twilio';
 import sodium from 'libsodium-wrappers';
 import { hashPhone } from './utils/phoneHash';
 
-
-
 const fastify = Fastify({ logger: true });
 const prisma = new PrismaClient();
 
@@ -108,52 +106,77 @@ fastify.post("/verify-otp", async (request, reply) => {
     }
   });
 
-// ✅ Store Encrypted Messages Route (Place this here)
-fastify.post("/send-message", async (request, reply) => {
-    const { senderId, receiverId, encryptedMessage } = request.body;
-    
-    if (!senderId || !receiverId || !encryptedMessage) {
-      return reply.status(400).send({ error: "Missing required fields" });
-    }
-  
-    try {
-        // ✅ Check if sender exists
-        const sender = await prisma.user.findUnique({ where: { id: senderId } });
-        if (!sender) return reply.status(400).send({ error: "Sender not found" });
-    
-        // ✅ Check if receiver exists
-        const receiver = await prisma.user.findUnique({ where: { id: receiverId } });
-        if (!receiver) return reply.status(400).send({ error: "Receiver not found" });
-    
-        // ✅ Create encrypted message
-        const message = await prisma.message.create({
-          data: {
-            senderId,
-            receiverId,
-            content: encryptedMessage, // Store only encrypted content
-          },
-        });
-  
-      return reply.send({ message: "Message stored securely", messageId: message.id });
-    } catch (error) {
-      return reply.status(500).send({ error: error instanceof Error ? error.message : "An unknown error occurred" });
-    }
-  });
+fastify.get("/get-user-public-key", async (request, reply) => {
+    const { userId } = request.query as { userId: string };
 
-fastify.get('/get-messages', async (request, reply) => {
-    try {
-      const messages = await prisma.message.findMany({
-        orderBy: {
-            createdAt: 'asc',
-        },
+    if (!userId) {
+        return reply.status(400).send({ error: "User ID is required" });
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { publicKey: true },
     });
 
-      return reply.send(messages);
-    } catch (error) {
-      console.error("Error fetching messages:", error);
-      return reply.status(500).send({ error: "Failed to retrieve messages" });
+    if (!user || !user.publicKey) {
+        return reply.status(404).send({ error: "Public key not found" });
     }
+
+    return reply.send({ receiverPublicKey: user.publicKey }); // ✅ Standardized naming
+});
+
+// ✅ Store Encrypted Messages Route (Place this here)
+fastify.post('/send-message', async (request, reply) => {
+    console.log("📩 Incoming request body:", request.body);
+
+    const { senderId, receiverId, content, nonce } = request.body as { senderId: string; receiverId: string; content: string; nonce: string };
+
+    if (!senderId || !receiverId || !content || !nonce) {
+        console.error("❌ Missing required fields:", { senderId, receiverId, content, nonce });
+        return reply.status(400).send({ error: "Missing required fields" });
+    }
+
+    try {
+        const savedMessage = await prisma.message.create({
+            data: {
+                senderId,
+                receiverId,
+                content, // Store already encrypted content
+                nonce,   // Store nonce for decryption
+            },
+        });
+
+        console.log("✅ Message stored successfully:", savedMessage);
+        return reply.send({ message: "Message sent", id: savedMessage.id });
+
+    } catch (error) {
+        console.error("❌ Database storage failed:", error);
+        return reply.status(500).send({ error: "Internal server error" });
+    }
+});
+
+
+  fastify.get("/get-messages", async (request, reply) => {
+    const messages = await prisma.message.findMany({
+      select: {
+        id: true,
+        senderId: true,
+        receiverId: true,
+        content: true,  // Encrypted text
+        nonce: true,    // Required for decryption
+        sender: { select: { publicKey: true } }, // Fetch sender's public key
+      },
+    });
+  
+    return messages.map(msg => ({
+      id: msg.id,
+      senderId: msg.senderId,
+      senderPublicKey: msg.sender.publicKey, // Send the sender's public key
+      content: msg.content,
+      nonce: msg.nonce,  // Include nonce for decryption
+    }));
   });
+  
   
 
 fastify.get('/', async (request, reply) => {

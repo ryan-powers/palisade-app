@@ -14,22 +14,30 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(uuid())    // UUID for user identification
-  phoneHash   String?  @unique                 // Store hashed phone here
-  verified    Boolean  @default(false)         // Whether phone verification is completed
-  publicKey   String?                          // For E2EE (optional)
-  createdAt   DateTime @default(now())         // Timestamp for account creation
-  messages    Message[]                        // Relationship to messages
+  id         String   @id @default(uuid())  
+  phoneHash  String   @unique               
+  verified   Boolean  @default(false)       
+  publicKey  String?                         
+  createdAt  DateTime @default(now())         
+
+  // ✅ Define relation fields without `fields` or `references`
+  sentMessages     Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
 }
 
 
 model Message {
-  id          String   @id @default(uuid())
-  senderId    String
-  sender      User     @relation(fields: [senderId], references: [id])
-  receiverId  String   // ID of the recipient
-  content     String   // ✅ Encrypted message content
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  senderId   String
+  receiverId String
+  content    String   // This stores the encrypted message
+  nonce      String   // ✅ Ensure nonce is required
+  createdAt  DateTime @default(now())
+
+  // ✅ Add relation names to avoid ambiguity
+  sender   User @relation("SentMessages", fields: [senderId], references: [id])
+  receiver User @relation("ReceivedMessages", fields: [receiverId], references: [id])
 }
+
 
 

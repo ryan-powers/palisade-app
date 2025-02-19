@@ -2,124 +2,151 @@
 
 import { useEffect, useState } from "react";
 import sodium from "libsodium-wrappers";
-import { getPrivateKey } from "../login/page";
+import { getPrivateKey } from "../login/page"; // Ensure this fetches from IndexedDB
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<
-    { id: string; senderId: string; text: string }[]
-  >([]);
+  const [messages, setMessages] = useState<{ id: string; senderId: string; text: string }[]>([]);
   const [chatInput, setChatInput] = useState("");
-  const [userId, setUserId] = useState(""); // Simulate logged-in user
+  const [userId, setUserId] = useState("e704ff7e-85b4-424d-ba19-cdc1c5a8fcf5"); // Simulate logged-in user
+  const [receiverId, setReceiverId] = useState("e704ff7e-85b4-424d-ba19-cdc1c5a8fcf5"); // For testing, message yourself
   const [privateKey, setPrivateKey] = useState<string | null>(null);
   const [publicKey, setPublicKey] = useState<string | null>(null);
-  const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(
-    null
-  );
 
-  // ✅ Simulate loading user details (Replace this with actual auth/user fetching
-
+  // 1. On page load, fetch user's private key & public key
   useEffect(() => {
     async function loadUserKeys() {
       await sodium.ready;
-      const storedPrivateKey = await getPrivateKey(); // ✅ Now fetching from IndexedDB
+      const storedPrivateKey = await getPrivateKey(); 
       const storedPublicKey = localStorage.getItem("publicKey");
 
       console.log("🔑 Checking stored keys...");
       console.log("Stored Private Key:", storedPrivateKey);
       console.log("Stored Public Key:", storedPublicKey);
-  
+
       if (!storedPrivateKey || !storedPublicKey) {
         console.error("🚨 No private key found, redirecting to login...");
-        
-        // ❗ Force a pause before redirect
-        alert("Redirecting to login! Open Console (F12) and check logs.");
-        debugger; // ❗ This stops execution so you can inspect state
-  
-        setTimeout(() => {
-          window.location.href = "/login"; // Delayed redirect
-        }, 5000); // ❗ 5-second delay to ensure logs remain visible
-  
+        window.location.href = "/login";
         return;
       }
-  
       setPrivateKey(storedPrivateKey);
       setPublicKey(storedPublicKey);
     }
-  
     loadUserKeys();
   }, []);
 
-  // ✅ Encrypt a message before sending
-  async function encryptMessage(message: string, recipientPublicKey: string) {
+  // 2. Function to encrypt the message
+  async function encryptMessage(plainText: string, receiverPublicKey: string) {
     await sodium.ready;
-    const publicKey = sodium.from_base64(recipientPublicKey);
-    const encryptedMessage = sodium.crypto_box_seal(message, publicKey);
-    return sodium.to_base64(encryptedMessage);
-  }
-
-  // ✅ Send an encrypted message
-  async function sendMessage() {
-    if (!chatInput.trim() || !recipientPublicKey) return;
-
-    const encryptedText = await encryptMessage(chatInput, recipientPublicKey);
-
-    const res = await fetch("http://localhost:4000/send-message", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        senderId: userId,
-        receiverId: userId, // TODO: Replace with actual recipient
-        encryptedMessage: encryptedText,
-      }),
-    });
-
-    const data = await res.json();
-    console.log("Message sent:", data);
-
-    setMessages([...messages, { id: data.messageId, senderId: userId, text: chatInput }]);
-    setChatInput("");
-  }
-
-  // ✅ Decrypt messages before displaying them
-  async function decryptMessage(encryptedMessage: string) {
-    if (!privateKey) return "🔒 Encrypted Message";
-
-    await sodium.ready;
-    const encryptedBytes = sodium.from_base64(encryptedMessage);
-    const decryptedMessage = sodium.crypto_box_seal_open(
-      encryptedBytes,
+    const privateKey = await getPrivateKey();
+    if (!privateKey) {
+      console.error("🚨 No private key found!");
+      return null;
+    }
+    const nonce = sodium.randombytes_buf(sodium.crypto_box_NONCEBYTES);
+    const nonceBase64 = sodium.to_base64(nonce);
+    const encrypted = sodium.crypto_box_easy(
+      sodium.from_string(plainText),
+      nonce,
+      sodium.from_base64(receiverPublicKey),
       sodium.from_base64(privateKey)
     );
-
-    return new TextDecoder().decode(decryptedMessage);
+    return {
+      encryptedMessage: sodium.to_base64(encrypted),
+      nonce: nonceBase64
+    };
   }
 
-  // ✅ Fetch messages from backend & decrypt them
-  async function fetchMessages() {
+  // 3. Send the encrypted message to the backend
+  const sendMessage = async () => {
+    if (!chatInput.trim()) return;
+
     try {
-      const res = await fetch("http://localhost:4000/get-messages");
-      const fetchedMessages = await res.json();
-  
-      console.log("📥 Raw Fetched Messages:", fetchedMessages); // Debugging log
-  
-      if (!Array.isArray(fetchedMessages)) {
-        console.error("❌ Expected an array but got:", fetchedMessages);
-        return;
+      // Fetch receiver's public key
+      const publicKeyRes = await fetch(`http://localhost:4000/get-user-public-key?userId=${receiverId}`);
+      const { receiverPublicKey } = await publicKeyRes.json();
+
+      if (!receiverPublicKey) {
+        throw new Error("No public key found for receiver");
       }
-  
-      const decryptedMessages = await Promise.all(
-        fetchedMessages.map(async (msg: any) => ({
+
+      console.log("🔐 Encrypting message...");
+      const encryptionResult = await encryptMessage(chatInput.trim(), receiverPublicKey);
+      if (!encryptionResult) throw new Error("Encryption failed");
+
+      const { encryptedMessage, nonce } = encryptionResult;
+
+      // Post to /send-message
+      const sendRes = await fetch("http://localhost:4000/send-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderId: userId,
+          receiverId,
+          content: encryptedMessage,
+          nonce
+        }),
+      });
+
+      if (!sendRes.ok) {
+        const data = await sendRes.json();
+        throw new Error(data.error || "Send message failed");
+      }
+
+      console.log("📩 Message sent successfully!");
+      setChatInput("");
+      // Optionally refetch messages to see it appear
+      fetchMessages();
+
+    } catch (error) {
+      console.error("❌ Error sending message:", error);
+    }
+  };
+
+  // 4. Decrypt messages
+  async function decryptMessage(encryptedMessage: string, senderPublicKey: string, nonce: string) {
+    await sodium.ready;
+    const privateKey = await getPrivateKey();
+    if (!privateKey) {
+      console.error("No private key found!");
+      return "🔒 Encrypted Message";
+    }
+    try {
+      const decrypted = sodium.crypto_box_open_easy(
+        sodium.from_base64(encryptedMessage),
+        sodium.from_base64(nonce),
+        sodium.from_base64(senderPublicKey),
+        sodium.from_base64(privateKey)
+      );
+      return new TextDecoder().decode(decrypted);
+    } catch (err) {
+      console.error("Decryption failed:", err);
+      return "🔒 Encrypted Message";
+    }
+  }
+
+  // 5. Fetch messages from backend & decrypt them
+  async function fetchMessages() {
+    const res = await fetch("http://localhost:4000/get-messages");
+    const fetchedMessages = await res.json();
+
+    console.log("📥 Raw Fetched Messages:", fetchedMessages);
+    if (!Array.isArray(fetchedMessages)) {
+      console.error("❌ Expected an array but got:", fetchedMessages);
+      return;
+    }
+
+    const decrypted = await Promise.all(
+      fetchedMessages.map(async (msg: any) => {
+        const text = await decryptMessage(msg.content, msg.senderPublicKey, msg.nonce);
+        return {
           id: msg.id,
           senderId: msg.senderId,
-          text: await decryptMessage(msg.content),
-        }))
-      );
-  
-      console.log("✅ Decrypted Messages:", decryptedMessages);
-      setMessages(decryptedMessages);
-    } catch (error) {
-      console.error("❌ Error fetching messages:", error);
-    }
+          text
+        };
+      })
+    );
+    console.log("✅ Decrypted Messages:", decrypted);
+    setMessages(decrypted);
   }
 
   useEffect(() => {
