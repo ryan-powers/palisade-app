@@ -54,9 +54,9 @@ fastify.post('/send-otp', async (request, reply) => {
       }
       return reply.status(500).send({ error: 'An unknown error occurred' });
     }
-  });
   
-
+});
+  
 // ✅ Verify OTP
 fastify.post("/verify-otp", async (request, reply) => {
     const { phone, code } = request.body as { phone: string; code: string };
@@ -104,8 +104,10 @@ fastify.post("/verify-otp", async (request, reply) => {
     } catch (error) {
       return reply.status(500).send({ error: error instanceof Error ? error.message : "An unknown error occurred" });
     }
-  });
+  
+});
 
+// ✅ Get User Public Key
 fastify.get("/get-user-public-key", async (request, reply) => {
     const { userId } = request.query as { userId: string };
 
@@ -123,6 +125,65 @@ fastify.get("/get-user-public-key", async (request, reply) => {
     }
 
     return reply.send({ receiverPublicKey: user.publicKey }); // ✅ Standardized naming
+});
+
+// ✅ Set Display Name
+fastify.post("/set-display-name", async (request, reply) => {
+  const userId = request.headers["user-id"] as string;
+  const { displayName } = request.body as { displayName: string };
+
+  if (!userId || !displayName) {
+    return reply.status(400).send({ 
+      error: "User ID and display name are required",
+      receivedUserId: userId,
+      receivedDisplayName: displayName 
+    });
+  }
+
+  try {
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { displayName },
+    });
+
+    console.log("✅ Updated user:", updatedUser);
+    return reply.send({ 
+      message: "Display name updated successfully", 
+      user: updatedUser 
+    });
+  } catch (error) {
+    console.error("❌ Error updating display name:", error);
+    return reply.status(500).send({ 
+      error: "Internal server error",
+      details: error instanceof Error ? error.message : "Unknown error" 
+    });
+  }
+});
+
+
+// ✅ Get Display Name
+fastify.get("/get-display-name", async (request, reply) => {
+  const userId = request.headers["user-id"] as string;
+
+  if (!userId) {
+      return reply.status(401).send({ error: "User ID is required" });
+  }
+
+  try {
+      const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { displayName: true },
+      });
+
+      if (!user) {
+        return reply.status(404).send({ error: "User not found." });
+      }
+
+      return reply.send({ displayName: user.displayName });
+  } catch (error) {
+      console.error("❌ Error retrieving display name:", error);
+      return reply.status(500).send({ error: "Internal server error" });
+  }
 });
 
 // ✅ Store Encrypted Messages Route (Place this here)
@@ -155,29 +216,29 @@ fastify.post('/send-message', async (request, reply) => {
     }
 });
 
-
-  fastify.get("/get-messages", async (request, reply) => {
-    const messages = await prisma.message.findMany({
-      select: {
-        id: true,
-        senderId: true,
-        receiverId: true,
-        content: true,  // Encrypted text
-        nonce: true,    // Required for decryption
-        sender: { select: { publicKey: true } }, // Fetch sender's public key
-      },
-    });
-  
-    return messages.map(msg => ({
-      id: msg.id,
-      senderId: msg.senderId,
-      senderPublicKey: msg.sender.publicKey, // Send the sender's public key
-      content: msg.content,
-      nonce: msg.nonce,  // Include nonce for decryption
-    }));
+// ✅ Get Messages
+fastify.get("/get-messages", async (request, reply) => {
+  const messages = await prisma.message.findMany({
+    select: {
+      id: true,
+      senderId: true,
+      receiverId: true,
+      content: true,  // Encrypted text
+      nonce: true,    // Required for decryption
+      sender: { select: { publicKey: true } }, // Fetch sender's public key
+    },
   });
+
+  return messages.map(msg => ({
+    id: msg.id,
+    senderId: msg.senderId,
+    senderPublicKey: msg.sender.publicKey, // Send the sender's public key
+    content: msg.content,
+    nonce: msg.nonce,  // Include nonce for decryption
+  }));
+});
   
-  
+
 
 fastify.get('/', async (request, reply) => {
   return { message: 'Hello from Fastify with Twilio Verify!' };

@@ -1,8 +1,10 @@
 "use client"; // Needed to use React hooks & state in Next.js App Router
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { openDB } from "idb";
+import { useUserContext } from "../context/UserContext";
+
 
 async function savePrivateKey(privateKey: string) {
     const db = await openDB("palisadeDB", 1, {
@@ -37,12 +39,24 @@ async function savePrivateKey(privateKey: string) {
 
 export default function LoginPage() {
   const router = useRouter();
-
-  // State management
+  const { setUserId, setDisplayName } = useUserContext();
+  
+  // State management for login page
   const [phone, setPhone] = useState("+1");
   const [code, setCode] = useState("");
   const [step, setStep] = useState<"enter-phone" | "enter-code">("enter-phone");
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    // Check if user is already logged in
+    const userId = localStorage.getItem("userId");
+    const publicKey = localStorage.getItem("publicKey");
+    
+    if (userId && publicKey) {
+      // User is already logged in, redirect to chat
+      window.location.href = "/chat";
+    }
+  }, []);
 
   function handlePhoneChange(e: React.ChangeEvent<HTMLInputElement>) {
     const val = e.target.value;
@@ -87,24 +101,38 @@ export default function LoginPage() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
   
-      setMessage(`Success! Your phone is verified. User ID: ${data.userId}`);
-  
-      console.log("Public Key from Server:", data.publicKey);
-      console.log("Private Key (Client Only):", data.privateKey);
-  
-      if (data.privateKey) {
-        await savePrivateKey(data.privateKey); // ✅ Ensure key is stored
-        console.log("Private key saved, now redirecting...");
-      }
+      // Store the new userId
+      setUserId(data.userId);
+      localStorage.setItem("userId", data.userId);
 
+      // Store keys
+      if (data.privateKey) {
+        await savePrivateKey(data.privateKey);
+      }
       if (data.publicKey) {
         localStorage.setItem("publicKey", data.publicKey);
       }
+
+      // Fetch the user's existing display name
+      try {
+        const displayNameRes = await fetch("http://localhost:4000/get-display-name", {
+          headers: { "user-id": data.userId },
+        });
+        const { displayName } = await displayNameRes.json();
+
+        if (displayName) {
+          console.log("✅ Restored previous display name:", displayName);
+          setDisplayName(displayName);
+          localStorage.setItem("displayName", displayName);
+        }
+      } catch (error) {
+        console.warn("⚠️ Could not fetch display name:", error);
+      }
   
-      // ✅ Delay redirect slightly to ensure IndexedDB is updated
+      // Redirect to chat
       setTimeout(() => {
         router.push("/chat");
-      }, 500); // Wait 500ms before redirecting
+      }, 500);
   
     } catch (err: any) {
       setMessage("Error: " + err.message);

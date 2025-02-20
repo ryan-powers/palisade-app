@@ -17,7 +17,8 @@ model User {
   id         String   @id @default(uuid())  
   phoneHash  String   @unique               
   verified   Boolean  @default(false)       
-  publicKey  String?                         
+  publicKey  String?
+  displayName String? // Display name
   createdAt  DateTime @default(now())         
 
   // ✅ Define relation fields without `fields` or `references`
