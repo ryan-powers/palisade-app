@@ -22,7 +22,6 @@ export default function ChatPage() {
   const [privateKey, setPrivateKey] = useState<string | null>(null);
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-
   const { displayName, setUserId: setContextUserId } = useUserContext();
 
   // Add ref for the messages container
