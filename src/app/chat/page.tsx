@@ -7,11 +7,30 @@ import UserProfileModal from "../components/modals/UserProfileModal";
 import { useUserContext } from "@/app/context/UserContext";
 import React from "react";
 import { FaCog } from "react-icons/fa";
+import ChatWindow from "../components/ChatWindow";
+import Sidebar from "../components/Sidebar";
+import PrototypeChatWindow from "../components/PrototypeChatWindow";
+import PrivateChannelWindow from "../components/PrivateChannelWindow";
+import NewChatWindow from "../components/NewChatWindow";
+import DirectMessageSidebar from "../components/DirectMessageSidebar";
+import SettingsSidebar from "../components/SettingsSidebar";
 
 interface Message {
   id: string;
   senderId: string;
   content: string;
+}
+
+interface Channel {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  description: string;
+}
+
+interface DMUser {
+  name: string;
+  isOnline: boolean;
 }
 
 export default function ChatPage() {
@@ -23,6 +42,15 @@ export default function ChatPage() {
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const { displayName, setUserId: setContextUserId } = useUserContext();
+  const [selectedChannel, setSelectedChannel] = useState("general");
+  const [currentChannel, setCurrentChannel] = useState<Channel>({
+    id: "1",
+    name: "general",
+    isPrivate: false,
+    description: "Channel for all-team announcements and questions."
+  });
+  const [selectedDM, setSelectedDM] = useState<DMUser | null>(null);
+  const [showDMsPage, setShowDMsPage] = useState(false);
 
   // Add ref for the messages container
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
@@ -109,9 +137,8 @@ export default function ChatPage() {
     };
   }
 
-  // 3. Send the encrypted message to the backend
-  const sendMessage = async () => {
-    if (!chatInput.trim()) return;
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim()) return;
 
     try {
       // Fetch receiver's public key
@@ -123,13 +150,13 @@ export default function ChatPage() {
       }
 
       console.log("🔐 Encrypting message...");
-      const encryptionResult = await encryptMessage(chatInput.trim(), receiverPublicKey);
+      const encryptionResult = await encryptMessage(text, receiverPublicKey);
       if (!encryptionResult) throw new Error("Encryption failed");
 
       const { encryptedMessage, nonce } = encryptionResult;
 
       // Post to /send-message
-      const sendRes = await fetch("http://localhost:4000/send-message", {
+      const response = await fetch("http://localhost:4000/send-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -140,16 +167,14 @@ export default function ChatPage() {
         }),
       });
 
-      if (!sendRes.ok) {
-        const data = await sendRes.json();
+      if (response.ok) {
+        console.log("📩 Message sent successfully!");
+        setChatInput("");
+        fetchMessages();
+      } else {
+        const data = await response.json();
         throw new Error(data.error || "Send message failed");
       }
-
-      console.log("📩 Message sent successfully!");
-      setChatInput("");
-      // Optionally refetch messages to see it appear
-      fetchMessages();
-
     } catch (error) {
       console.error("❌ Error sending message:", error);
     }
@@ -233,114 +258,81 @@ useEffect(() => {
   fetchDisplayNames();
 }, [messages]);
 
+  // Add handler for channel selection
+  const handleChannelChange = (channelId: string, channelName: string, description?: string) => {
+    setSelectedChannel(channelName);
+    setSelectedDM(null);
+    setCurrentChannel(prev => ({
+      ...prev,
+      id: channelId,
+      name: channelName,
+      description: description || ''
+    }));
+  };
+
+  // Add handler for DM selection
+  const handleDMSelect = (userName: string, isOnline: boolean) => {
+    setSelectedDM({ name: userName, isOnline });
+    setSelectedChannel(""); // Clear channel selection
+  };
+
+  // Add handler for DMs button click
+  const handleDMsClick = () => {
+    setShowDMsPage(true);
+    setSelectedDM(null);
+    setSelectedChannel("");
+  };
+
+  // Add handler for Home button click
+  const handleHomeClick = () => {
+    setShowDMsPage(false);
+    setSelectedDM(null);
+    setSelectedChannel("general");
+  };
+
   return (
     <div className="h-screen w-screen flex">
-      {/* Sidebar */}
-      <aside className="flex flex-col w-64 bg-gray-800 text-white">
-        <div className="p-4 text-2xl font-bold border-b border-gray-700">
-          Palisade
-        </div>
+      <SettingsSidebar 
+        workspaceName="Palisade"
+        userInitial="R"
+        onOpenProfile={() => setIsProfileModalOpen(true)}
+        onDMsClick={handleDMsClick}
+        onHomeClick={handleHomeClick}
+      />
+      
+      {/* Only show Sidebar when not in DMs page */}
+      {!showDMsPage && (
+        <Sidebar 
+          onOpenProfile={() => setIsProfileModalOpen(true)} 
+          onChannelSelect={handleChannelChange}
+          onDMSelect={handleDMSelect}
+        />
+      )}
+      
+      {showDMsPage ? (
+        <DirectMessageSidebar />
+      ) : selectedChannel === "product" ? (
+        <PrototypeChatWindow />
+      ) : selectedChannel === "engineering" ? (
+        <PrivateChannelWindow />
+      ) : selectedChannel === "general" ? (
+        <ChatWindow
+          messages={messages}
+          onSendMessage={handleSendMessage}
+          userId={userId}
+        />
+      ) : (
+        <NewChatWindow
+          channelName={currentChannel.name}
+          channelDescription={currentChannel.description}
+          isPrivate={currentChannel.isPrivate}
+        />
+      )}
 
-        <nav className="flex-1 overflow-y-auto">
-          {/* Channels */}
-          <div className="mt-4 px-4 text-sm font-semibold text-gray-400 uppercase">
-            Channels
-          </div>
-          <ul className="space-y-1 mt-2">
-            <li className="px-4 py-1 hover:bg-gray-700 transition-colors cursor-pointer">
-              # general
-            </li>
-            <li className="px-4 py-1 hover:bg-gray-700 transition-colors cursor-pointer">
-              # random
-            </li>
-          </ul>
-        </nav>
-      </aside>
-
-      {/* Main Chat Section */}
-      <main className="flex-1 flex flex-col bg-white">
-        {/* Channel Header */}
-        <header className="px-4 py-2 border-b border-gray-200 flex items-center justify-between">
-          <div className="font-semibold"># general</div>
-        </header>
-
-        {/* Messages container */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((msg) => {
-            const isOwnMessage = msg.senderId === userId;
-            return (
-              <ChatMessage
-                key={msg.id}
-                message={msg}
-                isOwnMessage={isOwnMessage}
-              />
-            );
-          })}
-          {/* Add div ref for scrolling */}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Chat Input */}
-        <div className="border-t border-gray-200 p-2 flex items-center">
-          <input
-            className="flex-1 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-            type="text"
-            placeholder="Type a message..."
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") sendMessage();
-            }}
-          />
-          <button
-            onClick={sendMessage}
-            className="ml-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-          >
-            Send
-          </button>
-        </div>
-      </main>
-
-      {/* Profile Icon */}
-      <div className="absolute bottom-3 left-3 flex flex-col items-center">
-        <button
-          className="w-10 h-10 rounded-full bg-gray-300 hover:bg-gray-400 flex items-center justify-center cursor-pointer mb-2"
-          onClick={() => setIsProfileModalOpen(true)}
-        >
-          <FaCog className="w-5 h-5 text-gray-700" />
-        </button>
-        <div
-          className="w-10 h-10 rounded-full bg-gray-300 hover:bg-gray-400 flex items-center justify-center cursor-pointer"
-        >
-          <span className="text-xl font-semibold text-gray-700">+</span>
-        </div>
-      </div>
-
-      {/* User Profile Modal */}
       <UserProfileModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
-        />
-    </div>
-  );
-}
-
-function ChatMessage({ message, isOwnMessage }: { message: Message; isOwnMessage: boolean }) {
-  const { userId, displayName } = useUserContext();
-  const senderDisplayName = message.senderId === userId 
-    ? (displayName || 'You')
-    : message.senderId.slice(0, 8);
-  
-  return (
-    <div className="flex justify-start mb-4">
-      <div className={`rounded-lg px-4 py-3 max-w-[70%] bg-gray-200`}>
-        <div className="text-sm font-bold mb-2 text-black">
-          {senderDisplayName}
-        </div>
-        <div className="text-gray-800">
-          {message.content}
-        </div>
-      </div>
+      />
     </div>
   );
 }

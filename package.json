@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@heroicons/react": "^2.2.0",
     "idb": "^8.0.2",
     "libsodium-wrappers": "^0.7.15",
     "next": "15.1.7",

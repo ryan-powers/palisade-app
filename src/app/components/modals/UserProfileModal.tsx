@@ -9,7 +9,6 @@ interface UserProfileModalProps {
 
 const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onClose }) => {
   const context = useUserContext(); // Get the full context
-  console.log("🔍 UserContext in modal:", context); // Debug log
 
   const { userId, displayName, setDisplayName, logout } = context;
   const [isNameModalOpen, setIsNameModalOpen] = useState(false);
